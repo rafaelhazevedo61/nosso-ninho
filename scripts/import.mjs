@@ -1,0 +1,6 @@
+import {readFile} from 'node:fs/promises';
+import {createPool} from '../lib/database.mjs';
+import {itemSchema} from '../lib/validation.mjs';
+import {migrate} from './migrate.mjs';
+async function main(){const file=process.argv[2];if(!file)throw Error('Uso: npm run db:import -- caminho/arquivo.json');const data=JSON.parse(await readFile(file,'utf8'));if(!Array.isArray(data))throw Error('O arquivo precisa conter a lista JSON exportada.');const items=data.map(i=>{if(i.image?.startsWith('/api/images')){console.warn('Imagem antiga removida de '+i.name+': substitua por link externo.');i={...i,image:''}}return itemSchema.parse(i)});await migrate();const pool=createPool();const client=await pool.connect();try{await client.query('BEGIN');let inserted=0;for(const i of items){const r=await client.query('INSERT INTO items(id,payload) VALUES($1,$2::jsonb) ON CONFLICT(id) DO NOTHING',[i.id,JSON.stringify(i)]);inserted+=r.rowCount}await client.query('COMMIT');console.log(inserted+' itens importados; IDs já existentes foram preservados.')}catch(e){await client.query('ROLLBACK');throw e}finally{client.release();await pool.end()}}
+main().catch(e=>{console.error('Importação não concluída:',e instanceof Error?e.message:'Erro desconhecido');process.exitCode=1});
